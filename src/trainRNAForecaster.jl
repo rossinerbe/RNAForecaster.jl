@@ -110,27 +110,42 @@ function trainNetworkVal(trainData, valData,
    return (model, losses)
 end
 
-#Function to train RNAForecaster based on expression data
-#main input is two matrices representing expression data from two different time
-#points in the same cell
-#this can be either based on splicing or metabolic labeling currently
-#each should be log normalized and have genes as rows and cells as columns
-##Required Arguments
-# expressionDataT1 - Matrix of log-normalized expression counts in the format of genes x cells
-# expressionDataT2 - Matrix of log-normalized expression counts in the format of genes x cells from a time after expressionDataT1
-##Optional Arguments
-# trainingProp - proportion of the data to use for training the model, the rest will be used for a validation set. If you don't want a validation set, this value can be set to 1.0
-# hiddenLayerNodes - number of nodes in the hidden layer of the neural network
-# shuffleData - should the cells be randomly shuffled before training
-# seed - random seed
-# learningRate - learning rate for the neural network during training
-# nEpochs - how many times should the neural network be trained on the data. Generally yields small gains, can be lowered to speed up the training process
-# batchsize - batch size for training
-# checkStability - should the stability of the networks future time predictions be checked, retraining the network if unstable?
-# iterToCheck - when checking stability, how many future time steps should be predicted?
-# stabilityThreshold - when checking stability, what is the maximum gene variance allowable across predictions?
-# stabilityChecksBeforeFail - when checking stability, how many times should the network be allowed to retrain before an error is thrown? Used to prevent an infinite loop.
-# useGPU - use a GPU to train the neural network? highly recommended for large data sets, if available
+"""
+`trainRNAForecaster(expressionDataT1::Matrix{Float32}, expressionDataT2::Matrix{Float32};
+     trainingProp::Float64 = 0.8, hiddenLayerNodes::Int = 2*size(expressionDataT1)[1],
+     shuffleData::Bool = true, seed::Int = 123, learningRate::Float64 = 0.005,
+     nEpochs::Int = 10, batchsize::Int = 10, checkStability::Bool = true, iterToCheck::Int = 50,
+     stabilityThreshold::Float32 = 2*maximum(expressionDataT1), stabilityChecksBeforeFail::Int = 5,
+     useGPU::Bool = false)`
+
+Function to train RNAForecaster based on expression data. Main input is two
+matrices representing expression data from two different time points in the same cell.
+This can be either based on splicing or metabolic labeling currently.
+Each should be log normalized and have genes as rows and cells as columns.
+
+# Required Arguments
+* expressionDataT1 - Float32 Matrix of log-normalized expression counts in the format of genes x cells
+* expressionDataT2 - Float32 Matrix of log-normalized expression counts in the format
+ of genes x cells from a time after expressionDataT1
+# Keyword Arguments
+* trainingProp - proportion of the data to use for training the model, the rest will be
+ used for a validation set. If you don't want a validation set, this value can be set to 1.0
+* hiddenLayerNodes - number of nodes in the hidden layer of the neural network
+* shuffleData - should the cells be randomly shuffled before training
+* seed - random seed
+* learningRate - learning rate for the neural network during training
+* nEpochs - how many times should the neural network be trained on the data.
+ Generally yields small gains in performance, can be lowered to speed up the training process
+* batchsize - batch size for training
+* checkStability - should the stability of the networks future time predictions be checked,
+ retraining the network if unstable?
+* iterToCheck - when checking stability, how many future time steps should be predicted?
+* stabilityThreshold - when checking stability, what is the maximum gene variance allowable across predictions?
+* stabilityChecksBeforeFail - when checking stability, how many times should the network
+ be allowed to retrain before an error is thrown? Used to prevent an infinite loop.
+* useGPU - use a GPU to train the neural network? highly recommended for large data sets, if available
+
+"""
 
 function trainRNAForecaster(expressionDataT1::Matrix{Float32}, expressionDataT2::Matrix{Float32};
      trainingProp::Float64 = 0.8, hiddenLayerNodes::Int = 2*size(expressionDataT1)[1],

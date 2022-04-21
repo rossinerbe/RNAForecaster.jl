@@ -1,19 +1,33 @@
-#function to make future expression predictions using a trained neural ODE
-#outputs a 3d tensor containing a predicted expression counts matrix for the
-#cell at each time step
-##Required Arguments
-# trainedNetwork - the trained neural ODE, from the trainRNAForecaster function
-# expressionData - the initial expression states that should be used to make predictions from
-# tSteps - how many future time steps should be predicted. (Error will propagate with each prediction so predictions will eventually become highly innaccurate at high numbers of time steps)
-##Optional Arguments
-# KOGenes - a vector of gene names that will be set to zero in the predictions, simulating a knock out.
-# geneNames - a vector of gene names in the order of the rows of the expressionData. Used only when simulating KOs.
-# enforceMaxPred - should a maximum allowed prediction be enforced? This is used to represent prior knowledge about what sort of expression values are remotely reasonable predictions.
-# maxPrediction - if enforcing a maximum prediction, what should the value be? 2 times the maximum of the input expression data by default.
+"""
+`function predictCellFutures(trainedNetwork, expressionData::Matrix{Float32}, tSteps::Int;
+     perturbGenes::Vector{String} = Vector{String}(undef,0), geneNames::Vector{String} = Vector{String}(undef,0),
+     perturbationLevels::Vector{Float32} = Vector{Float32}(undef,0),
+     enforceMaxPred::Bool = true, maxPrediction::Float32 = 2*maximum(expressionData))`
+
+Function to make future expression predictions using a trained neural ODE
+outputs a 3d tensor containing a predicted expression counts matrix for the
+cell at each time step
+# Required Arguments
+* trainedNetwork - the trained neural ODE, from the trainRNAForecaster function
+* expressionData - the initial expression states that should be used to make predictions from
+* tSteps - how many future time steps should be predicted. (Error will propagate
+ with each prediction so predictions will eventually become highly innaccurate at high numbers of time steps)
+# Keyword Arguments
+* perturbGenes - a vector of gene names that will have their values set to a constant 'perturbed' level.
+* geneNames - a vector of gene names in the order of the rows of the expressionData.
+Used only when simulating perturbations.
+* perturbationLevels - a vector of Float32, corresponding to the level each perturbed
+ gene's expression should be set at.
+# enforceMaxPred - should a maximum allowed prediction be enforced? This is used
+ to represent prior knowledge about what sort of expression values are remotely reasonable predictions.
+# maxPrediction - if enforcing a maximum prediction, what should the value be?
+2 times the maximum of the input expression data by default (in log space).
+"""
 function predictCellFutures(trainedNetwork, expressionData::Matrix{Float32}, tSteps::Int;
-     KOGenes::Vector{String} = Vector{String}(undef,0), geneNames::Vector{String} = Vector{String}(undef,0),
+     perturbGenes::Vector{String} = Vector{String}(undef,0), geneNames::Vector{String} = Vector{String}(undef,0),
+     perturbationLevels::Vector{Float32} = Vector{Float32}(undef,0),
      enforceMaxPred::Bool = true, maxPrediction::Float32 = 2*maximum(expressionData))
-    if length(KOGenes) == 0
+    if length(perturbGenes) == 0
         inputData = copy(expressionData)
         predictions = Array{Float32}(undef, size(expressionData)[1], size(expressionData)[2], tSteps)
         @suppress begin
@@ -38,10 +52,14 @@ function predictCellFutures(trainedNetwork, expressionData::Matrix{Float32}, tSt
             in the input data.")
         end
 
+        if length(perturbGenes) != length(perturbationLevels)
+            error("perturbGenes and perturbationLevels must be the same length.")
+        end
+
         inputData = copy(expressionData)
-        #set virtual KO genes to zero
-        KOGeneInds = findall(in(KOGenes), geneNames)
-        inputData[KOGeneInds,:] .= 0
+        #set perturbation gene levels
+        perturbGeneInds = findall(in(perturbGenes), geneNames)
+        inputData[perturbGeneInds,:] .= perturbationLevels[perturbGeneInds]
         predictions = Array{Float32}(undef, size(expressionData)[1], size(expressionData)[2], tSteps)
         @suppress begin
             for i=1:tSteps
@@ -50,8 +68,8 @@ function predictCellFutures(trainedNetwork, expressionData::Matrix{Float32}, tSt
                 end
                 #set negative predictions to zero
                 predictions[findall(x->x < 0, predictions)] .= 0
-                #set KO genes to zero
-                predictions[KOGeneInds,:,i] .= 0
+                #set perturb gene expression levels
+                predictions[perturbGeneInds,:,i] .= perturbationLevels[perturbGeneInds]
 
                 if enforceMaxPred
                     predictions[findall(x->x > maxPrediction, predictions)] .= maxPrediction
