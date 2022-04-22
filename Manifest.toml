@@ -146,6 +146,12 @@ git-tree-sha1 = "063b2e77c5537a548c5bf2f44161f1d3e1ab3227"
 uuid = "7057c7e9-c182-5462-911a-8362d720325c"
 version = "0.3.10"
 
+[[CategoricalArrays]]
+deps = ["DataAPI", "Future", "Missings", "Printf", "Requires", "Statistics", "Unicode"]
+git-tree-sha1 = "109664d3a6f2202b1225478335ea8fea3cd8706b"
+uuid = "324d7699-5711-5eae-9e2f-1d82baa6b597"
+version = "0.10.5"
+
 [[ChainRules]]
 deps = ["ChainRulesCore", "Compat", "IrrationalConstants", "LinearAlgebra", "Random", "RealDot", "SparseArrays", "Statistics"]
 git-tree-sha1 = "8b887daa6af5daf705081061e36386190204ac87"
@@ -787,6 +793,12 @@ version = "7.1.1"
 [[LinearAlgebra]]
 deps = ["Libdl"]
 uuid = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+
+[[LinearRegression]]
+deps = ["LinearAlgebra", "StatsAPI"]
+git-tree-sha1 = "aa2b3594174096780c87f131f5258f8700dfc369"
+uuid = "92481ed7-9fb7-40fd-80f2-46fd0f076581"
+version = "0.2.1"
 
 [[LinearSolve]]
 deps = ["ArrayInterface", "DocStringExtensions", "IterativeSolvers", "KLU", "Krylov", "KrylovKit", "LinearAlgebra", "RecursiveFactorization", "Reexport", "Requires", "SciMLBase", "Setfield", "SparseArrays", "SuiteSparse", "UnPack"]

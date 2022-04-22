@@ -48,7 +48,32 @@ states. For example, to predict the next fifty time points from our test data,
 we could run:
 
 ```julia
-testOut2 = predictCellFutures(testForecaster[1], testT1, 50)
+testOut1 = predictCellFutures(testForecaster[1], testT1, 50)
 ```
 
 The predictions can also be conditioned on arbitrary perturbations in gene expression.
+```julia
+geneNames = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"]
+testOut2 = predictCellFutures(testForecaster[1], testT1, 50, perturbGenes = ["A", "B", "F"],
+geneNames = geneNames, perturbationLevels = [1.0f0, 2.0f0, 0.0f0])
+```
+
+
+All options for `predictCellFutures` are shown here:
+```@docs
+predictCellFutures
+```
+
+Once we have forecast expression levels for each gene, we may want to know which
+genes expression levels change the most over time, as these are likely to be important
+in ongoing biological process we are attempting to model.
+To assay this we simply run `mostTimeVariableGenes` which outputs a table of genes
+ordered by the most variable over predicted time points.
+
+```julia
+geneOutputTable = mostTimeVariableGenes(testOut1, geneNames)
+```
+
+```@docs
+mostTimeVariableGenes
+```

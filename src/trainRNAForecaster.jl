@@ -66,14 +66,14 @@ function trainNetwork(trainData, nGenes::Int,
     ps = Flux.params(model)
     losses = Vector{Float32}(undef, nEpochs)
     @suppress begin
-       for epoch in 1:nEpochs
-           for (x, y) in trainData
-               gs = gradient(() -> mse(model(x), y), ps) # compute gradient
-               Flux.Optimise.update!(opt, ps, gs) # update parameters
-           end
+        for epoch in 1:nEpochs
+            for (x, y) in trainData
+                gs = gradient(() -> mse(model(x), y), ps) # compute gradient
+                Flux.Optimise.update!(opt, ps, gs) # update parameters
+            end
 
-           # Report on training error
-           losses[epoch]= meanLoss(trainData, model)
+            # Report on train and validation error
+            losses[epoch]= meanLoss(trainData, model)
        end
     end
     return (model, losses)
@@ -241,7 +241,7 @@ function trainRNAForecaster(expressionDataT1::Matrix{Float32}, expressionDataT2:
                   learningRate, nEpochs)
 
                 #check model stability
-                checkStability = checkModelStability(trainNet[1], trainX,
+                checkStability = checkModelStability(trainedNet[1], trainX,
                  iterToCheck, stabilityThreshold)
                 Random.seed!(seed+iter)
                 iter +=1
