@@ -11,12 +11,13 @@ using Distances
 
 export trainRNAForecaster, predictCellFutures, mostTimeVariableGenes,
  KOeffectPredictions, totalKOImpact, geneKOExpressionChanges, geneResponseToKOs,
- estimateT1LabelingData
+ estimateT1LabelingData, filterByZeroProp, filterByGeneVar
 
 include("trainRNAForecaster.jl")
 include("makeRecursivePredictions.jl")
 include("splicedDataPerturbationEffectPredictions.jl")
 include("estimateT1.jl")
+include("utils.jl")
 
 
 end # module
