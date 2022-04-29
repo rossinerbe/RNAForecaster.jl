@@ -27,25 +27,26 @@ function predictCellFutures(trainedNetwork, expressionData::Matrix{Float32}, tSt
      perturbGenes::Vector{String} = Vector{String}(undef,0), geneNames::Vector{String} = Vector{String}(undef,0),
      perturbationLevels::Vector{Float32} = Vector{Float32}(undef,0),
      enforceMaxPred::Bool = true, maxPrediction::Float32 = 2*maximum(expressionData))
+
     if length(perturbGenes) == 0
         inputData = copy(expressionData)
         predictions = Array{Float32}(undef, size(expressionData)[1], size(expressionData)[2], tSteps)
-        @suppress begin
-            for i=1:tSteps
-                for j=1:size(expressionData)[2]
-                    predictions[:,j,i] = trainedNetwork(inputData[:,j])[1]
-                end
-                #set negative predictions to zero
-                predictions[findall(x->x < 0, predictions)] .= 0
 
-                if enforceMaxPred
-                    predictions[findall(x->x > maxPrediction, predictions)] .= maxPrediction
-                end
-
-                inputData = predictions[:,:,i]
-
+        for i=1:tSteps
+            for j=1:size(expressionData)[2]
+                predictions[:,j,i] = trainedNetwork(inputData[:,j])[1]
             end
+            #set negative predictions to zero
+            predictions[findall(x->x < 0, predictions)] .= 0
+
+            if enforceMaxPred
+                predictions[findall(x->x > maxPrediction, predictions)] .= maxPrediction
+            end
+
+            inputData = predictions[:,:,i]
+
         end
+
     else
         if length(geneNames) != size(expressionData)[1]
             error("Length of gene names is not equal to the number of rows (genes)
@@ -61,27 +62,44 @@ function predictCellFutures(trainedNetwork, expressionData::Matrix{Float32}, tSt
         perturbGeneInds = findall(in(perturbGenes), geneNames)
         inputData[perturbGeneInds,:] .= perturbationLevels[sortperm(perturbGeneInds)]
         predictions = Array{Float32}(undef, size(expressionData)[1], size(expressionData)[2], tSteps)
-        @suppress begin
-            for i=1:tSteps
-                for j=1:size(expressionData)[2]
-                    predictions[:,j,i] = trainedNetwork(inputData[:,j])[1]
-                end
-                #set negative predictions to zero
-                predictions[findall(x->x < 0, predictions)] .= 0
-                #set perturb gene expression levels
-                predictions[perturbGeneInds,:,i] .= perturbationLevels[sortperm(perturbGeneInds)]
-
-                if enforceMaxPred
-                    predictions[findall(x->x > maxPrediction, predictions)] .= maxPrediction
-                end
-
-                inputData = predictions[:,:,i]
+        for i=1:tSteps
+            for j=1:size(expressionData)[2]
+                predictions[:,j,i] = trainedNetwork(inputData[:,j])[1]
             end
+            #set negative predictions to zero
+            predictions[findall(x->x < 0, predictions)] .= 0
+            #set perturb gene expression levels
+            predictions[perturbGeneInds,:,i] .= perturbationLevels[sortperm(perturbGeneInds)]
+
+            if enforceMaxPred
+                predictions[findall(x->x > maxPrediction, predictions)] .= maxPrediction
+            end
+
+            inputData = predictions[:,:,i]
         end
     end
 
     return predictions
 end
+
+function ensembleExpressionPredictions(networks, expressionData::Matrix{Float32}, tSteps::Int;
+     perturbGenes::Vector{String} = Vector{String}(undef,0), geneNames::Vector{String} = Vector{String}(undef,0),
+     perturbationLevels::Vector{Float32} = Vector{Float32}(undef,0),
+     enforceMaxPred::Bool = true, maxPrediction::Float32 = 2*maximum(expressionData))
+
+     predictionData = Vector{Any}(undef, length(networks))
+     for i = 1:length(networks)
+         predictionData[i] = @spawn predictCellFutures(networks[i][1], expressionData,
+              tSteps, perturbGenes= perturbGenes, geneNames = geneNames,
+              perturbationLevels = perturbationLevels,
+              enforceMaxPred = enforceMaxPred, maxPrediction = maxPrediction)
+    end
+
+    results = fetch.(predictionData)
+
+    return results
+
+ end
 
 """
 `mostTimeVariableGenes(cellFutures::AbstractArray{Float32}, geneNames::Vector{String};

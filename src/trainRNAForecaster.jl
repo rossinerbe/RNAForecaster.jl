@@ -4,7 +4,8 @@ function minZero(num::AbstractArray{<:Number})
 end
 
 #function to check model prediction stability for each gene
-function checkModelStability(model, initialConditions::Matrix{Float32}, iterToCheck::Int, expressionThreshold::Float32)
+function checkModelStability(model, initialConditions::Matrix{Float32},
+     iterToCheck::Int, expressionThreshold::Float32, useGPU::Bool)
 
     println("Checking Model Stability...")
 
@@ -15,16 +16,24 @@ function checkModelStability(model, initialConditions::Matrix{Float32}, iterToCh
         recordedVals[:,:,i] = inputData
 
         #calculate model predictions
-        exprPreds = Matrix{Float32}(undef, size(inputData)[1], size(inputData)[2])
-        #suppressing warning messages
-        @suppress begin
+        if useGPU
+            exprPreds = Matrix{Float32}(undef, size(inputData)[1], size(inputData)[2]) |> gpu
+            inputData = inputData |> gpu
             for x=1:size(exprPreds)[2]
-                pred = model(inputData[:,x])
-                exprPreds[:,x] = minZero(pred[1])
+                pred = model(inputData[:,x])[1]
+                exprPreds[:,x] = minZero(pred)
             end
+            inputData = cpu(copy(exprPreds))
+        else
+            exprPreds = Matrix{Float32}(undef, size(inputData)[1], size(inputData)[2])
+            for x=1:size(exprPreds)[2]
+                pred = model(inputData[:,x])[1]
+                exprPreds[:,x] = minZero(pred)
+            end
+            inputData = copy(exprPreds)
         end
 
-        inputData = copy(exprPreds)
+
     end
 
     #check expression levels
@@ -42,7 +51,7 @@ function meanLoss(data_loader, model)
     ls = 0.0f0
     num = 0
     for (x, y) in data_loader
-        ŷ = model(x)
+        ŷ = model(x)[1]
         ls += mse(ŷ, y)
         num +=  size(x)[end]
     end
@@ -52,59 +61,76 @@ end
 
 #train the neural ODE
 function trainNetwork(trainData, nGenes::Int,
-     hiddenLayerNodes::Int, learningRate::Float64, nEpochs::Int)
+     hiddenLayerNodes::Int, learningRate::Float64, nEpochs::Int, useGPU::Bool)
 
-    nn = Chain(Dense(nGenes, hiddenLayerNodes, relu),
-               Dense(hiddenLayerNodes, nGenes)) |> gpu
-    model = NeuralODE(nn, (0.0f0, 1.0f0), Tsit5(),
-                       save_everystep = false,
-                       reltol = 1e-3, abstol = 1e-3,
-                       save_start = false) |> gpu
+     if useGPU
+        nn = Chain(Dense(nGenes, hiddenLayerNodes, relu),
+                   Dense(hiddenLayerNodes, nGenes)) |> gpu
+        model = NeuralODE(nn, (0.0f0, 1.0f0), Tsit5(),
+                           save_everystep = false,
+                           reltol = 1e-3, abstol = 1e-3,
+                           save_start = false)|> gpu
+    else
+        nn = Chain(Dense(nGenes, hiddenLayerNodes, relu),
+                   Dense(hiddenLayerNodes, nGenes))
+        model = NeuralODE(nn, (0.0f0, 1.0f0), Tsit5(),
+                           save_everystep = false,
+                           reltol = 1e-3, abstol = 1e-3,
+                           save_start = false)
+    end
 
+
+    loss(x,y) = mse(model(x)[1], y)
     opt = ADAM(learningRate)
 
-    ps = Flux.params(model)
     losses = Vector{Float32}(undef, nEpochs)
-    @suppress begin
-        for epoch in 1:nEpochs
-            for (x, y) in trainData
-                gs = gradient(() -> mse(model(x), y), ps) # compute gradient
-                Flux.Optimise.update!(opt, ps, gs) # update parameters
-            end
-
-            # Report on train and validation error
-            losses[epoch]= meanLoss(trainData, model)
-       end
+    for epoch = 1:nEpochs
+      for d in trainData
+        gs = gradient(Flux.params(model)) do
+          l = loss(d...)
+        end
+        Flux.Optimise.update!(opt, Flux.params(model), gs)
+      end
+      losses[epoch]= meanLoss(trainData, model)
     end
+
     return (model, losses)
 end
 
 #train the neural ODE with validation set
-function trainNetworkVal(trainData, valData,
-     nGenes::Int, hiddenLayerNodes::Int, learningRate::Float64, nEpochs::Int)
+function trainNetworkVal(trainData, valData, nGenes::Int, hiddenLayerNodes::Int,
+     learningRate::Float64, nEpochs::Int, useGPU::Bool)
 
-    nn = Chain(Dense(nGenes, hiddenLayerNodes, relu),
-               Dense(hiddenLayerNodes, nGenes)) |> gpu
-    model = NeuralODE(nn, (0.0f0, 1.0f0), Tsit5(),
-                       save_everystep = false,
-                       reltol = 1e-3, abstol = 1e-3,
-                       save_start = false)|> gpu
+     if useGPU
+        nn = Chain(Dense(nGenes, hiddenLayerNodes, relu),
+                   Dense(hiddenLayerNodes, nGenes)) |> gpu
+        model = NeuralODE(nn, (0.0f0, 1.0f0), Tsit5(),
+                           save_everystep = false,
+                           reltol = 1e-3, abstol = 1e-3,
+                           save_start = false)|> gpu
+    else
+        nn = Chain(Dense(nGenes, hiddenLayerNodes, relu),
+                   Dense(hiddenLayerNodes, nGenes))
+        model = NeuralODE(nn, (0.0f0, 1.0f0), Tsit5(),
+                           save_everystep = false,
+                           reltol = 1e-3, abstol = 1e-3,
+                           save_start = false)
+    end
 
    opt = ADAM(learningRate)
+   loss(x,y) = mse(model(x)[1], y)
 
-   ps = Flux.params(model)
    losses = Matrix{Float32}(undef, nEpochs, 2)
-   @suppress begin
-       for epoch in 1:nEpochs
-           for (x, y) in trainData
-               gs = gradient(() -> mse(model(x), y), ps) # compute gradient
-               Flux.Optimise.update!(opt, ps, gs) # update parameters
-           end
-
-           # Report on train and validation error
-           losses[epoch,1]= meanLoss(trainData, model)
-           losses[epoch,2] = meanLoss(valData, model)
+   for epoch = 1:nEpochs
+     for d in trainData
+       gs = gradient(Flux.params(model)) do
+         l = loss(d...)
        end
+       Flux.Optimise.update!(opt, Flux.params(model), gs)
+     end
+     # Report on train and validation error
+     losses[epoch,1]= meanLoss(trainData, model)
+     losses[epoch,2] = meanLoss(valData, model)
    end
 
    return (model, losses)
@@ -114,7 +140,7 @@ end
 `trainRNAForecaster(expressionDataT1::Matrix{Float32}, expressionDataT2::Matrix{Float32};
      trainingProp::Float64 = 0.8, hiddenLayerNodes::Int = 2*size(expressionDataT1)[1],
      shuffleData::Bool = true, seed::Int = 123, learningRate::Float64 = 0.005,
-     nEpochs::Int = 10, batchsize::Int = 10, checkStability::Bool = true, iterToCheck::Int = 50,
+     nEpochs::Int = 10, batchsize::Int = 100, checkStability::Bool = true, iterToCheck::Int = 50,
      stabilityThreshold::Float32 = 2*maximum(expressionDataT1), stabilityChecksBeforeFail::Int = 5,
      useGPU::Bool = false)`
 
@@ -177,14 +203,14 @@ function trainRNAForecaster(expressionDataT1::Matrix{Float32}, expressionDataT2:
          valY = expressionDataT2[:,cellsInTraining+1:size(expressionDataT1)[2]]
 
          if useGPU
-             trainData = DataLoader(gpu.((trainX, trainY)), batchsize=batchsize)
-             valData = DataLoader(gpu.((valX, valY)), batchsize=batchsize)
+             trainData = ([(trainX[:,i], trainY[:,i]) for i in partition(1:size(trainX)[2], batchsize)]) |> gpu
+             valData = ([(valX[:,i], valY[:,i]) for i in partition(1:size(valX)[2], batchsize)]) |> gpu
          else
-             trainData = DataLoader((trainX, trainY), batchsize=batchsize)
-             valData = DataLoader((valX, valY), batchsize=batchsize)
+             trainData = ([(trainX[:,i], trainY[:,i]) for i in partition(1:size(trainX)[2], batchsize)])
+             valData = ([(valX[:,i], valY[:,i]) for i in partition(1:size(valX)[2], batchsize)])
          end
 
-         println("Training model...")
+         println("Training model with " * string(nGenes) * " genes and " * string(hiddenLayerNodes) * " nodes in the hidden layer ...")
          if checkStability
              iter = 1
              #repeat until model is stable or until user defined break point
@@ -197,17 +223,17 @@ function trainRNAForecaster(expressionDataT1::Matrix{Float32}, expressionDataT2:
 
                  #train the neural ODE
                  trainedNet = trainNetworkVal(trainData, valData,
-                      nGenes, hiddenLayerNodes, learningRate, nEpochs)
+                      nGenes, hiddenLayerNodes, learningRate, nEpochs, useGPU)
 
                 #check model stability
-                checkStability = checkModelStability(trainedNet[1], trainX, iterToCheck, stabilityThreshold)
+                checkStability = checkModelStability(trainedNet[1], trainX, iterToCheck, stabilityThreshold, useGPU)
                 Random.seed!(seed+iter)
                 iter +=1
             end
         else
             #train the neural ODE
             trainedNet = trainNetworkVal(trainData, valData,
-                 nGenes, hiddenLayerNodes, learningRate, nEpochs)
+                 nGenes, hiddenLayerNodes, learningRate, nEpochs, useGPU)
        end
 
        return trainedNet
@@ -220,12 +246,12 @@ function trainRNAForecaster(expressionDataT1::Matrix{Float32}, expressionDataT2:
          trainY = expressionDataT2
 
          if useGPU
-             trainData = DataLoader(gpu.((trainX, trainY)), batchsize=batchsize)
+             trainData = ([(trainX[:,i], trainY[:,i]) for i in partition(1:size(trainX)[2], batchsize)]) |> gpu
          else
-             trainData = DataLoader((trainX, trainY), batchsize=batchsize)
+             trainData = ([(trainX[:,i], trainY[:,i]) for i in partition(1:size(trainX)[2], batchsize)])
          end
 
-         println("Training model...")
+         println("Training model with " * string(nGenes) * " genes and " * string(hiddenLayerNodes) * " nodes in the hidden layer ...")
          if checkStability
              iter = 1
              #repeat until model is stable or until user defined break point
@@ -238,20 +264,81 @@ function trainRNAForecaster(expressionDataT1::Matrix{Float32}, expressionDataT2:
 
                  #train the neural ODE
                  trainedNet = trainNetwork(trainData, nGenes, hiddenLayerNodes,
-                  learningRate, nEpochs)
+                  learningRate, nEpochs, useGPU)
 
                 #check model stability
                 checkStability = checkModelStability(trainedNet[1], trainX,
-                 iterToCheck, stabilityThreshold)
+                 iterToCheck, stabilityThreshold, useGPU)
                 Random.seed!(seed+iter)
                 iter +=1
             end
         else
             #train the neural ODE
             trainedNet = trainNetwork(trainData, nGenes, hiddenLayerNodes,
-             learningRate, nEpochs)
+             learningRate, nEpochs, useGPU)
        end
 
        return trainedNet
      end
  end
+
+
+function createEnsembleForecaster(expressionDataT1::Matrix{Float32}, expressionDataT2::Matrix{Float32};
+     nNetworks::Int = 5, trainingProp::Float64 = 0.8,
+     hiddenLayerNodes::Int = 2*size(expressionDataT1)[1],
+     shuffleData::Bool = true, seed::Int = 123, learningRate::Float64 = 0.005,
+     nEpochs::Int = 10, batchsize::Int = 10)
+
+     println("Loading Data...")
+      #randomly shuffle the input data cells
+      if shuffleData
+         Random.seed!(seed)
+         shuffling = shuffle(1:size(expressionDataT1)[2])
+         expressionDataT1 = expressionDataT1[:,shuffling]
+         expressionDataT2 = expressionDataT2[:,shuffling]
+     end
+
+     #get the number of genes in the data
+     nGenes = size(expressionDataT1)[1]
+
+     if trainingProp < 1.0
+         #subset the data into training and validation sets
+         #determine how many cells should be in training set
+         cellsInTraining = Int(round(size(expressionDataT1)[2]*trainingProp))
+
+         trainX = expressionDataT1[:,1:cellsInTraining]
+         trainY = expressionDataT2[:,1:cellsInTraining]
+         valX = expressionDataT1[:,cellsInTraining+1:size(expressionDataT1)[2]]
+         valY = expressionDataT2[:,cellsInTraining+1:size(expressionDataT1)[2]]
+
+         trainData = ([(trainX[:,i], trainY[:,i]) for i in partition(1:size(trainX)[2], batchsize)])
+         valData = ([(valX[:,i], valY[:,i]) for i in partition(1:size(valX)[2], batchsize)])
+
+         println("Training " * string(nNetworks) * " networks on " * string(Distributed.nprocs()) * " parallel processes ...")
+         println("With " * string(nGenes) * " genes and " * string(hiddenLayerNodes) * " nodes in the hidden layer ...")
+         networks = Vector{Any}(undef, nNetworks)
+         for i=1:nNetworks
+             networks[i] = @spawn trainNetworkVal(trainData, valData,
+                  nGenes, hiddenLayerNodes, learningRate, nEpochs, false)[1]
+         end
+         results = fetch.(networks)
+
+         return results
+
+    else
+        trainX = expressionDataT1
+        trainY = expressionDataT2
+        trainData = ([(trainX[:,i], trainY[:,i]) for i in partition(1:size(trainX)[2], batchsize)])
+
+        println("Training " * string(nNetworks) * " networks on " * string(Distributed.nprocs()) * " parallel processes ...")
+        println("With " * string(nGenes) * " genes and " * string(hiddenLayerNodes) * " nodes in the hidden layer ...")
+        networks = Vector{Any}(undef, nNetworks)
+        for i=1:nNetworks
+            networks[i] = @spawn trainNetwork(trainData,
+                 nGenes, hiddenLayerNodes, learningRate, nEpochs, false)[1]
+        end
+        results = fetch.(networks)
+
+        return results
+    end
+end

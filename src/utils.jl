@@ -78,4 +78,40 @@ function filterByGeneVar(t1Counts::Matrix{Float32}, t2Counts::Matrix{Float32},
     return (t1Counts, t2Counts)
 end
 
-    
+"""
+`saveForecaster(trainedModel, fileName::String)`
+
+Saves the parameters from the neural network after training.
+
+# Required Arguments
+* trainedModel - the trained neural network from trainRNAForecaster - just the network
+don't include the loss results
+* fileName - fileName to save the parameters to. Must end in .jld2
+"""
+function saveForecaster(trainedModel, fileName::String)
+    save_object(fileName, Flux.params(trainedModel))
+end
+
+"""
+`loadForecaster(fileName::String, inputNodes::Int, hiddenLayerNodes::Int)`
+
+Recreates a previously saved neural network.
+
+# Required Arguments
+* fileName - file name where the parameters are saved
+* inputNodes - number of input nodes in the network. Should be the same as the number
+of genes in the data the network was trained on
+* hiddenLayerNodes - number of hidden layer nodes in the network
+"""
+function loadForecaster(fileName::String, inputNodes::Int, hiddenLayerNodes::Int)
+    #recreate neural network structure
+    nn = Chain(Dense(inputNodes, hiddenLayerNodes, relu),
+               Dense(hiddenLayerNodes, inputNodes))
+    model = NeuralODE(nn, (0.0f0, 1.0f0), Tsit5(),
+                       save_everystep = false,
+                       reltol = 1e-3, abstol = 1e-3,
+                       save_start = false)
+    #load parameters into the model
+    model = loadmodel!(model, load_object(fileName))
+    return model
+end

@@ -8,6 +8,10 @@ of any or all single gene perturbations.
 Outputs a tuple containing the cells used for prediction, the expression predictions,
 the gene wise differences, and the cell-wise euclidean distances for each perturbation.
 
+This function is capable of running on multiple parallel processes using Distributed.jl.
+Call addprocs(n) before running the function to add parallel workers, where n is the
+number of additional processes desired.
+
 # Required Arguments
 * trainedNetwork - trained neuralODE from trainRNAForecaster
 * splicedData - log normalized spliced counts matrix. Must be in Float32 format
@@ -29,14 +33,17 @@ function perturbEffectPredictions(trainedNetwork, splicedData::Matrix{Float32}, 
     cellsToUse = sample(1:size(splicedData)[2], nCells, replace = false)
     splicedSub = splicedData[:, cellsToUse]
 
+    if nprocs() > 1
+        println("Predicting perturbation effects using " * string(nprocs()) * " parallel processes.")
+    end
+
     if length(perturbGenes) == 0
         #make prediction for initial conditions
         #matrix to store data in
         initialPredictions = Matrix{Float32}(undef, size(splicedData)[1], nCells)
-        @suppress begin
-            for n=1:nCells
-                initialPredictions[:,n] = trainedNetwork(splicedSub[:,n])[1]
-            end
+        for n=1:nCells
+             tmpPred = @spawn trainedNetwork(splicedSub[:,n])[1]
+             initialPredictions[:,n] = fetch(tmpPred)
         end
 
         #set negative predictions to zero
@@ -45,15 +52,14 @@ function perturbEffectPredictions(trainedNetwork, splicedData::Matrix{Float32}, 
         #create tensor to store perturbation output in: nGenes X perturbations(nGenes) x nCells
         perturbPredictions = Array{Float32}(undef, size(splicedData)[1], size(splicedData)[1], nCells)
         #make predictions
-        @suppress begin
             for n=1:nCells
                 for i=1:size(splicedData)[1]
                     tmpCell = splicedSub[:,n]
                     tmpCell[i] = 0
-                    perturbPredictions[:,i,n] = trainedNetwork(tmpCell)[1]
+                    tmpPred = @spawn trainedNetwork(tmpCell)[1]
+                    perturbPredictions[:,i,n] = fetch(tmpPred)
                 end
             end
-        end
     else
         if length(geneNames) != size(splicedSub)[1]
             error("Length of gene names is not equal to the number of rows (genes)
@@ -63,11 +69,10 @@ function perturbEffectPredictions(trainedNetwork, splicedData::Matrix{Float32}, 
         #make prediction for initial conditions
         #matrix to store data in
         initialPredictions = Matrix{Float32}(undef, size(splicedData)[1], nCells)
-        @suppress begin
             for n=1:nCells
-                initialPredictions[:,n] = trainedNetwork(splicedSub[:,n])[1]
+                initialPredictions[:,n] = @spawn trainedNetwork(splicedSub[:,n])[1]
             end
-        end
+        initialPredictions = fetch.(initialPredictions)
 
         #set negative predictions to zero
         initialPredictions[findall(x->x < 0, initialPredictions)] .= 0
@@ -75,19 +80,18 @@ function perturbEffectPredictions(trainedNetwork, splicedData::Matrix{Float32}, 
         #create tensor to store perturbation output in: nGenes X perturbations x nCells
         perturbPredictions = Array{Float32}(undef, size(splicedData)[1], length(perturbGeneInds), nCells)
         #make predictions
-        @suppress begin
-            for n=1:nCells
-                for i= 1:length(perturbGeneInds)
-                    tmpCell = splicedSub[:,n]
-                    if length(perturbLevels) == 0
-                        tmpCell[perturbGeneInds[i]] = 0
-                    elseif length(perturbLevels) != length(perturbGenes)
-                        error("perturbLevels and perturbGenes must be the same length.")
-                    else
-                        tmpCell[perturbGeneInds[i]] = perturbLevels[i]
-                    end
-                    perturbPredictions[:,i,n] = trainedNetwork(tmpCell)[1]
+        for n=1:nCells
+            for i= 1:length(perturbGeneInds)
+                tmpCell = splicedSub[:,n]
+                if length(perturbLevels) == 0
+                    tmpCell[perturbGeneInds[i]] = 0
+                elseif length(perturbLevels) != length(perturbGenes)
+                    error("perturbLevels and perturbGenes must be the same length.")
+                else
+                    tmpCell[perturbGeneInds[i]] = perturbLevels[i]
                 end
+                tmpPred = @spawn trainedNetwork(tmpCell)[1]
+                perturbPredictions[:,i,n] = fetch(tmpPred)
             end
         end
     end
