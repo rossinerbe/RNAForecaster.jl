@@ -95,11 +95,22 @@ function ensembleExpressionPredictions(networks, expressionData::Matrix{Float32}
               enforceMaxPred = enforceMaxPred, maxPrediction = maxPrediction)
     end
 
-    results = fetch.(predictionData)
+    if nprocs() > 1
+        predictionData = fetch.(predictionData)
+    end
+
+    #wrangle the data shape and get median predictions from networks
+    predData = Array{Float32}(undef, tSteps, length(predictionData), size(expressionData)[1], size(expressionData)[2])
+    for i=1:length(predictionData)
+        predData[:,i,:,:] = permutedims(predictionData[i], (3,1,2))
+    end
+
+    results = permutedims(median(predData, dims=2)[:,1,:,:], (2,3,1))
 
     return results
 
  end
+
 
 """
 `mostTimeVariableGenes(cellFutures::AbstractArray{Float32}, geneNames::Vector{String};

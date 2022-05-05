@@ -115,3 +115,55 @@ function loadForecaster(fileName::String, inputNodes::Int, hiddenLayerNodes::Int
     model = loadmodel!(model, load_object(fileName))
     return model
 end
+
+
+
+function saveEnsembleForecaster(trainedForecaster, fileName::String; gpu::Bool = false)
+
+    if gpu
+        trainedNetworksCpu = Vector{Any}(undef, length(trainedForecaster))
+        for i=1:length(trainedForecaster)
+            trainedNetworksCpu[i] = cpu.(trainedForecaster[i])
+        end
+    end
+
+    paramVector = Vector{Any}(undef, length(trainedForecaster))
+    for i=1:length(trainedNetworksCpu)
+        paramVector[i] = Flux.params(trainedNetworksCpu[i][1])
+    end
+
+    save_object(fileName * ".jld2", paramVector)
+
+    #losses
+    lossVector = Vector{Any}(undef, length(trainedForecaster))
+    for i=1:length(trainedNetworksCpu)
+        lossVector[i] = trainedNetworksCpu[i][2]
+    end
+
+    save_object(fileName * "_Losses.jld2", lossVector)
+end
+
+
+
+function loadEnsembleForecaster(fileName::String, inputNodes::Int, hiddenLayerNodes::Int)
+
+    paramVec = load_object(fileName * ".jld2")
+    lossVec = load_object(fileName * "_Losses.jld2")
+
+    rnaForecaster = Vector{Any}(undef, length(paramVec))
+    for i=1:length(paramVec)
+        #recreate neural network structure
+        nn = Chain(Dense(inputNodes, hiddenLayerNodes, relu),
+                   Dense(hiddenLayerNodes, inputNodes))
+        model = NeuralODE(nn, (0.0f0, 1.0f0), Tsit5(),
+                           save_everystep = false,
+                           reltol = 1e-3, abstol = 1e-3,
+                           save_start = false)
+
+        model = loadmodel!(model, paramVec[i])
+
+        rnaForecaster[i] = (model, lossVec[i])
+    end
+
+    return rnaForecaster
+end
