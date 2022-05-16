@@ -17,23 +17,13 @@ function checkModelStability(model, initialConditions::Matrix{Float32},
 
         #calculate model predictions
         if useGPU
-            exprPreds = Matrix{Float32}(undef, size(inputData)[1], size(inputData)[2]) |> gpu
-            inputData = inputData |> gpu
-            for x=1:size(exprPreds)[2]
-                pred = model(inputData[:,x])[1]
-                exprPreds[:,x] = minZero(pred)
-            end
-            inputData = cpu(copy(exprPreds))
+            inputData = ([inputData[:,k] for k in partition(1:size(inputData)[2], Int(1e6))]) |> gpu
         else
-            exprPreds = Matrix{Float32}(undef, size(inputData)[1], size(inputData)[2])
-            for x=1:size(exprPreds)[2]
-                pred = model(inputData[:,x])[1]
-                exprPreds[:,x] = minZero(pred)
-            end
-            inputData = copy(exprPreds)
+            inputData = ([inputData[:,k] for k in partition(1:size(inputData)[2], Int(1e6))])
         end
 
-
+        exprPreds = minZero(cpu(model(inputData...)[1]))
+        inputData = exprPreds
     end
 
     #check expression levels
@@ -45,6 +35,7 @@ function checkModelStability(model, initialConditions::Matrix{Float32},
         return(true)
     end
 end
+
 
 #function to calculate the mean loss across all examples in the training/validation set
 function meanLoss(data_loader, model)

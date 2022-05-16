@@ -26,16 +26,29 @@ Used only when simulating perturbations.
 function predictCellFutures(trainedNetwork, expressionData::Matrix{Float32}, tSteps::Int;
      perturbGenes::Vector{String} = Vector{String}(undef,0), geneNames::Vector{String} = Vector{String}(undef,0),
      perturbationLevels::Vector{Float32} = Vector{Float32}(undef,0),
-     enforceMaxPred::Bool = true, maxPrediction::Float32 = 2*maximum(expressionData))
+     enforceMaxPred::Bool = true, maxPrediction::Float32 = 2*maximum(expressionData),
+     useGPU::Bool = false)
+
+     if useGPU
+         #load data and network onto the gpu
+         trainedNetwork = trainedNetwork |> gpu
+         expressionData = expressionData
+     end
 
     if length(perturbGenes) == 0
         inputData = copy(expressionData)
         predictions = Array{Float32}(undef, size(expressionData)[1], size(expressionData)[2], tSteps)
 
         for i=1:tSteps
-            for j=1:size(expressionData)[2]
-                predictions[:,j,i] = trainedNetwork(inputData[:,j])[1]
+            #allows the data to be processed by the neural network simultaneously
+            if useGPU
+                inputData = ([inputData[:,k] for k in partition(1:size(inputData)[2], Int(1e6))]) |> gpu
+            else
+                inputData = ([inputData[:,k] for k in partition(1:size(inputData)[2], Int(1e6))])
             end
+
+
+            predictions[:,:,i] = cpu(trainedNetwork(inputData...)[1])
             #set negative predictions to zero
             predictions[findall(x->x < 0, predictions)] .= 0
 
@@ -62,10 +75,17 @@ function predictCellFutures(trainedNetwork, expressionData::Matrix{Float32}, tSt
         perturbGeneInds = findall(in(perturbGenes), geneNames)
         inputData[perturbGeneInds,:] .= perturbationLevels[sortperm(perturbGeneInds)]
         predictions = Array{Float32}(undef, size(expressionData)[1], size(expressionData)[2], tSteps)
+
         for i=1:tSteps
-            for j=1:size(expressionData)[2]
-                predictions[:,j,i] = trainedNetwork(inputData[:,j])[1]
+            #allows the data to be processed by the neural network simultaneously
+            if useGPU
+                inputData = ([inputData[:,k] for k in partition(1:size(inputData)[2], Int(1e6))]) |> gpu
+            else
+                inputData = ([inputData[:,k] for k in partition(1:size(inputData)[2], Int(1e6))])
             end
+
+
+            predictions[:,:,i] = cpu(trainedNetwork(inputData...)[1])
             #set negative predictions to zero
             predictions[findall(x->x < 0, predictions)] .= 0
             #set perturb gene expression levels
@@ -82,21 +102,37 @@ function predictCellFutures(trainedNetwork, expressionData::Matrix{Float32}, tSt
     return predictions
 end
 
+
 function ensembleExpressionPredictions(networks, expressionData::Matrix{Float32}, tSteps::Int;
      perturbGenes::Vector{String} = Vector{String}(undef,0), geneNames::Vector{String} = Vector{String}(undef,0),
      perturbationLevels::Vector{Float32} = Vector{Float32}(undef,0),
-     enforceMaxPred::Bool = true, maxPrediction::Float32 = 2*maximum(expressionData))
+     enforceMaxPred::Bool = true, maxPrediction::Float32 = 2*maximum(expressionData),
+     useGPU::Bool = false)
+
+
+     if useGPU && nprocs() > 1
+         error("Creating multiple GPU processes is not currently supported.")
+     end
 
      predictionData = Vector{Any}(undef, length(networks))
-     for i = 1:length(networks)
-         predictionData[i] = @spawn predictCellFutures(networks[i][1], expressionData,
-              tSteps, perturbGenes= perturbGenes, geneNames = geneNames,
-              perturbationLevels = perturbationLevels,
-              enforceMaxPred = enforceMaxPred, maxPrediction = maxPrediction)
-    end
+     if nprocs() > 1
+         for i = 1:length(networks)
+             predictionData[i] = @spawn predictCellFutures(networks[i][1], expressionData,
+                  tSteps, perturbGenes= perturbGenes, geneNames = geneNames,
+                  perturbationLevels = perturbationLevels,
+                  enforceMaxPred = enforceMaxPred, maxPrediction = maxPrediction,
+                  useGPU = useGPU)
+        end
 
-    if nprocs() > 1
         predictionData = fetch.(predictionData)
+    else
+        for i = 1:length(networks)
+            predictionData[i] = predictCellFutures(networks[i][1], expressionData,
+                 tSteps, perturbGenes= perturbGenes, geneNames = geneNames,
+                 perturbationLevels = perturbationLevels,
+                 enforceMaxPred = enforceMaxPred, maxPrediction = maxPrediction,
+                 useGPU = useGPU)
+       end
     end
 
     #wrangle the data shape and get median predictions from networks
@@ -109,8 +145,7 @@ function ensembleExpressionPredictions(networks, expressionData::Matrix{Float32}
 
     return results
 
- end
-
+end
 
 """
 `mostTimeVariableGenes(cellFutures::AbstractArray{Float32}, geneNames::Vector{String};
