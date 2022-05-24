@@ -89,7 +89,7 @@ don't include the loss results
 * fileName - fileName to save the parameters to. Must end in .jld2
 """
 function saveForecaster(trainedModel, fileName::String)
-    save_object(fileName, Flux.params(trainedModel))
+    save_object(fileName, cpu(trainedModel))
 end
 
 """
@@ -97,22 +97,19 @@ end
 
 Recreates a previously saved neural network.
 
+Note: if for some reason you are loading the network and have not first loaded the
+DiffEqFlux and DifferentialEquations packages (normally should be loaded when loading
+RNAForecaster.jl) then the network will not work, even if you load the required
+packages afterwards.
+
 # Required Arguments
 * fileName - file name where the parameters are saved
 * inputNodes - number of input nodes in the network. Should be the same as the number
 of genes in the data the network was trained on
 * hiddenLayerNodes - number of hidden layer nodes in the network
 """
-function loadForecaster(fileName::String, inputNodes::Int, hiddenLayerNodes::Int)
-    #recreate neural network structure
-    nn = Chain(Dense(inputNodes, hiddenLayerNodes, relu),
-               Dense(hiddenLayerNodes, inputNodes))
-    model = NeuralODE(nn, (0.0f0, 1.0f0), Tsit5(),
-                       save_everystep = false,
-                       reltol = 1e-3, abstol = 1e-3,
-                       save_start = false)
-    #load parameters into the model
-    model = loadmodel!(model, load_object(fileName))
+function loadForecaster(fileName::String)
+    model = load_object(fileName)
     return model
 end
 
@@ -125,45 +122,17 @@ function saveEnsembleForecaster(trainedForecaster, fileName::String; gpu::Bool =
         for i=1:length(trainedForecaster)
             trainedNetworksCpu[i] = cpu.(trainedForecaster[i])
         end
+
+        save_object(fileName, trainedNetworksCpu)
+    else
+        save_object(fileName, trainedForecaster)
     end
-
-    paramVector = Vector{Any}(undef, length(trainedForecaster))
-    for i=1:length(trainedNetworksCpu)
-        paramVector[i] = Flux.params(trainedNetworksCpu[i][1])
-    end
-
-    save_object(fileName * ".jld2", paramVector)
-
-    #losses
-    lossVector = Vector{Any}(undef, length(trainedForecaster))
-    for i=1:length(trainedNetworksCpu)
-        lossVector[i] = trainedNetworksCpu[i][2]
-    end
-
-    save_object(fileName * "_Losses.jld2", lossVector)
 end
 
 
 
-function loadEnsembleForecaster(fileName::String, inputNodes::Int, hiddenLayerNodes::Int)
+function loadEnsembleForecaster(fileName::String)
 
-    paramVec = load_object(fileName * ".jld2")
-    lossVec = load_object(fileName * "_Losses.jld2")
-
-    rnaForecaster = Vector{Any}(undef, length(paramVec))
-    for i=1:length(paramVec)
-        #recreate neural network structure
-        nn = Chain(Dense(inputNodes, hiddenLayerNodes, relu),
-                   Dense(hiddenLayerNodes, inputNodes))
-        model = NeuralODE(nn, (0.0f0, 1.0f0), Tsit5(),
-                           save_everystep = false,
-                           reltol = 1e-3, abstol = 1e-3,
-                           save_start = false)
-
-        model = loadmodel!(model, paramVec[i])
-
-        rnaForecaster[i] = (model, lossVec[i])
-    end
-
+    rnaForecaster = load_object(fileName)
     return rnaForecaster
 end
