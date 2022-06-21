@@ -1,7 +1,7 @@
 name = "RNAForecaster"
 uuid = "89c3ded9-0a88-4470-ac19-d41b58fa4c14"
 authors = ["Rossin Erbe <rossinerbe@gmail.com>"]
-version = "0.9.0"
+version = "0.9.1"
 
 [deps]
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
