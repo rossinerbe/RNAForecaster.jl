@@ -8,5 +8,5 @@ intermediate time periods.
 # Installation
 Download [Julia 1.6](https://julialang.org/) or later, if you haven't already.
 
-You can add RNAForecaster from using Julia's package manager, by typing `] add RNAForecaster` or `add https://github.com/rossinerbe/RNAForecaster.jl` in the Julia prompt.
+You can add RNAForecaster from using Julia's package manager, by typing `] add RNAForecaster` or `] add https://github.com/rossinerbe/RNAForecaster.jl` in the Julia prompt.
 
