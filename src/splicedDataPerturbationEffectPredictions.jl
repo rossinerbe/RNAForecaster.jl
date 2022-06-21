@@ -70,9 +70,9 @@ function perturbEffectPredictions(trainedNetwork, splicedData::Matrix{Float32}, 
         #matrix to store data in
         initialPredictions = Matrix{Float32}(undef, size(splicedData)[1], nCells)
             for n=1:nCells
-                initialPredictions[:,n] = @spawn trainedNetwork(splicedSub[:,n])[1]
+                 tmpPred = @spawn trainedNetwork(splicedSub[:,n])[1]
+                 initialPredictions[:,n] = fetch(tmpPred)
             end
-        initialPredictions = fetch.(initialPredictions)
 
         #set negative predictions to zero
         initialPredictions[findall(x->x < 0, initialPredictions)] .= 0
@@ -228,3 +228,41 @@ function geneResponseToPerturb(perturbData, geneNames::Vector{String}, geneOfInt
 
     return geneData
 end
+
+"""
+`findSigRegulation(perturbData, geneNames::Vector{String};
+    pvalCut::Float64 = 0.05)`
+
+Function to get a sorted data frame of whether there exists a statistically significant
+difference between predicted gene expression before and after perturbation.
+# Required Arguments
+* perturbData - results from perturbEffectPredictions function
+* geneNames - vector of gene names in the order of the input expression data
+* pvalCut - p value threshold. Default is 0.05
+"""
+function findSigRegulation(perturbData, geneNames::Vector{String};
+    pvalCut::Float64 = 0.05)
+
+    pvalMat = Matrix{Float64}(undef, size(perturbData[3])[1], size(perturbData[3])[2])
+    for i=1:size(perturbData[3])[1]
+        for j=1:size(perturbData[3])[2]
+            pvalMat[i,j] = pvalue(OneSampleTTest(perturbData[3][i,j,:]))
+        end
+    end
+
+    sigRegs = findall(x->x < pvalCut, pvalMat)
+
+    #remove self regulation
+    toRemove = findall(x->x[1] == x[2], sigRegs)
+
+    sigRegs = sigRegs[setdiff(1:end, toRemove)]
+
+    #create output data frame
+    outDF = DataFrame(Regulator = geneNames[getindex.(sigRegs,2)],
+     Regulated = geneNames[getindex.(sigRegs,1)], PValue = pvalMat[sigRegs])
+
+     #sort by pval
+     sort!(outDF, [:PValue])
+
+     return outDF
+ end

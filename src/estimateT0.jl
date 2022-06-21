@@ -21,7 +21,7 @@ function calcDegradationRates(labeledData::Matrix{Float32}, totalData::Matrix{Fl
 end
 
 """"
-`estimateT1LabelingData(labeledData::Matrix{Float32}, totalData::Matrix{Float32},
+`estimateT0LabelingData(labeledData::Matrix{Float32}, totalData::Matrix{Float32},
     unlabeledData::Matrix{Float32}, labelingTime::AbstractVector)`
 
 Function to predict total expression level before labeling based on
@@ -34,17 +34,17 @@ Outputs the estimated time 1 counts matrix.
 * unlabeledData - Float32 counts matrix of unlabeled counts
 * labelingTime - Vector with the amount of time each cell was labeled for
 """
-function estimateT1LabelingData(labeledData::Matrix{Float32}, totalData::Matrix{Float32},
+function estimateT0LabelingData(labeledData::Matrix{Float32}, totalData::Matrix{Float32},
     unlabeledData::Matrix{Float32}, labelingTime::AbstractVector)
 
     degradationRateEstimates = calcDegradationRates(labeledData, totalData, labelingTime)
 
     labelingTimeCat = CategoricalArray(labelingTime)
-    t1 = copy(unlabeledData)
+    T0 = copy(unlabeledData)
     for i=1:length(levels(labelingTimeCat))
         cellsToUse = findall(x->x == levels(labelingTimeCat)[i], labelingTimeCat)
-        t1[:,cellsToUse] = t1[:,cellsToUse] .+ degradationRateEstimates[:,i]
+        T0[:,cellsToUse] = T0[:,cellsToUse] .+ degradationRateEstimates[:,i]
     end
 
-    return t1
+    return T0
 end

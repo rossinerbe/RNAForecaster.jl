@@ -5,7 +5,7 @@ end
 
 #function to check model prediction stability for each gene
 function checkModelStability(model, initialConditions::Matrix{Float32},
-     iterToCheck::Int, expressionThreshold::Float32, useGPU::Bool)
+     iterToCheck::Int, expressionThreshold::Float32, useGPU::Bool, batchsize::Int)
 
     println("Checking Model Stability...")
 
@@ -15,14 +15,20 @@ function checkModelStability(model, initialConditions::Matrix{Float32},
     for i=1:iterToCheck
         recordedVals[:,:,i] = inputData
 
+        exprPreds = Matrix{Float32}(undef, size(inputData)[1], size(inputData)[2])
+
         #calculate model predictions
         if useGPU
-            inputData = ([inputData[:,k] for k in partition(1:size(inputData)[2], Int(1e6))]) |> gpu
+            inputData = ([inputData[:,k] for k in partition(1:size(inputData)[2], batchsize)]) |> gpu
         else
-            inputData = ([inputData[:,k] for k in partition(1:size(inputData)[2], Int(1e6))])
+            inputData = ([inputData[:,k] for k in partition(1:size(inputData)[2], batchsize)])
         end
 
-        exprPreds = minZero(cpu(model(inputData...)[1]))
+        for j=1:length(inputData)
+            exprPreds[:,(1+((j-1)*batchsize)):(j*batchsize)] = cpu(trainedNetwork(inputData[[j]]...)[1])
+        end
+
+        exprPreds = minZero(exprPreds)
         inputData = exprPreds
     end
 
@@ -35,7 +41,6 @@ function checkModelStability(model, initialConditions::Matrix{Float32},
         return(true)
     end
 end
-
 
 #function to calculate the mean loss across all examples in the training/validation set
 function meanLoss(data_loader, model)
@@ -128,11 +133,11 @@ function trainNetworkVal(trainData, valData, nGenes::Int, hiddenLayerNodes::Int,
 end
 
 """
-`trainRNAForecaster(expressionDataT1::Matrix{Float32}, expressionDataT2::Matrix{Float32};
-     trainingProp::Float64 = 0.8, hiddenLayerNodes::Int = 2*size(expressionDataT1)[1],
+`trainRNAForecaster(expressionDataT0::Matrix{Float32}, expressionDataT1::Matrix{Float32};
+     trainingProp::Float64 = 0.8, hiddenLayerNodes::Int = 2*size(expressionDataT0)[1],
      shuffleData::Bool = true, seed::Int = 123, learningRate::Float64 = 0.005,
-     nEpochs::Int = 10, batchsize::Int = 100, checkStability::Bool = true, iterToCheck::Int = 50,
-     stabilityThreshold::Float32 = 2*maximum(expressionDataT1), stabilityChecksBeforeFail::Int = 5,
+     nEpochs::Int = 10, batchsize::Int = 100, checkStability::Bool = false, iterToCheck::Int = 50,
+     stabilityThreshold::Float32 = 2*maximum(expressionDataT0), stabilityChecksBeforeFail::Int = 5,
      useGPU::Bool = false)`
 
 Function to train RNAForecaster based on expression data. Main input is two
@@ -141,9 +146,9 @@ This can be either based on splicing or metabolic labeling currently.
 Each should be log normalized and have genes as rows and cells as columns.
 
 # Required Arguments
-* expressionDataT1 - Float32 Matrix of log-normalized expression counts in the format of genes x cells
-* expressionDataT2 - Float32 Matrix of log-normalized expression counts in the format
- of genes x cells from a time after expressionDataT1
+* expressionDataT0 - Float32 Matrix of log-normalized expression counts in the format of genes x cells
+* expressionDataT1 - Float32 Matrix of log-normalized expression counts in the format
+ of genes x cells from a time after expressionDataT0
 # Keyword Arguments
 * trainingProp - proportion of the data to use for training the model, the rest will be
  used for a validation set. If you don't want a validation set, this value can be set to 1.0
@@ -164,34 +169,34 @@ Each should be log normalized and have genes as rows and cells as columns.
 
 """
 
-function trainRNAForecaster(expressionDataT1::Matrix{Float32}, expressionDataT2::Matrix{Float32};
-     trainingProp::Float64 = 0.8, hiddenLayerNodes::Int = 2*size(expressionDataT1)[1],
+function trainRNAForecaster(expressionDataT0::Matrix{Float32}, expressionDataT1::Matrix{Float32};
+     trainingProp::Float64 = 0.8, hiddenLayerNodes::Int = 2*size(expressionDataT0)[1],
      shuffleData::Bool = true, seed::Int = 123, learningRate::Float64 = 0.005,
-     nEpochs::Int = 10, batchsize::Int = 100, checkStability::Bool = true, iterToCheck::Int = 50,
-     stabilityThreshold::Float32 = 2*maximum(expressionDataT1), stabilityChecksBeforeFail::Int = 5,
+     nEpochs::Int = 10, batchsize::Int = 100, checkStability::Bool = false, iterToCheck::Int = 50,
+     stabilityThreshold::Float32 = 2*maximum(expressionDataT0), stabilityChecksBeforeFail::Int = 5,
      useGPU::Bool = false)
 
      println("Loading Data...")
       #randomly shuffle the input data cells
       if shuffleData
          Random.seed!(seed)
-         shuffling = shuffle(1:size(expressionDataT1)[2])
+         shuffling = shuffle(1:size(expressionDataT0)[2])
+         expressionDataT0 = expressionDataT0[:,shuffling]
          expressionDataT1 = expressionDataT1[:,shuffling]
-         expressionDataT2 = expressionDataT2[:,shuffling]
      end
 
      #get the number of genes in the data
-     nGenes = size(expressionDataT1)[1]
+     nGenes = size(expressionDataT0)[1]
 
      if trainingProp < 1.0
          #subset the data into training and validation sets
          #determine how many cells should be in training set
-         cellsInTraining = Int(round(size(expressionDataT1)[2]*trainingProp))
+         cellsInTraining = Int(round(size(expressionDataT0)[2]*trainingProp))
 
-         trainX = expressionDataT1[:,1:cellsInTraining]
-         trainY = expressionDataT2[:,1:cellsInTraining]
-         valX = expressionDataT1[:,cellsInTraining+1:size(expressionDataT1)[2]]
-         valY = expressionDataT2[:,cellsInTraining+1:size(expressionDataT1)[2]]
+         trainX = expressionDataT0[:,1:cellsInTraining]
+         trainY = expressionDataT1[:,1:cellsInTraining]
+         valX = expressionDataT0[:,cellsInTraining+1:size(expressionDataT0)[2]]
+         valY = expressionDataT1[:,cellsInTraining+1:size(expressionDataT0)[2]]
 
          if useGPU
              trainData = ([(trainX[:,i], trainY[:,i]) for i in partition(1:size(trainX)[2], batchsize)]) |> gpu
@@ -217,7 +222,7 @@ function trainRNAForecaster(expressionDataT1::Matrix{Float32}, expressionDataT2:
                       nGenes, hiddenLayerNodes, learningRate, nEpochs, useGPU)
 
                 #check model stability
-                checkStability = checkModelStability(trainedNet[1], trainX, iterToCheck, stabilityThreshold, useGPU)
+                checkStability = checkModelStability(trainedNet[1], trainX, iterToCheck, stabilityThreshold, useGPU, batchsize)
                 Random.seed!(seed+iter)
                 iter +=1
             end
@@ -233,8 +238,8 @@ function trainRNAForecaster(expressionDataT1::Matrix{Float32}, expressionDataT2:
     #(e.g. if we have already validated its performance and we now want to
     #train using the full data set)
      else
-         trainX = expressionDataT1
-         trainY = expressionDataT2
+         trainX = expressionDataT0
+         trainY = expressionDataT1
 
          if useGPU
              trainData = ([(trainX[:,i], trainY[:,i]) for i in partition(1:size(trainX)[2], batchsize)]) |> gpu
@@ -259,7 +264,7 @@ function trainRNAForecaster(expressionDataT1::Matrix{Float32}, expressionDataT2:
 
                 #check model stability
                 checkStability = checkModelStability(trainedNet[1], trainX,
-                 iterToCheck, stabilityThreshold, useGPU)
+                 iterToCheck, stabilityThreshold, useGPU, batchsize)
                 Random.seed!(seed+iter)
                 iter +=1
             end
@@ -273,91 +278,92 @@ function trainRNAForecaster(expressionDataT1::Matrix{Float32}, expressionDataT2:
      end
  end
 
-"""
-`createEnsembleForecaster(expressionDataT1::Matrix{Float32}, expressionDataT2::Matrix{Float32};
-     nNetworks::Int = 5, trainingProp::Float64 = 0.8,
-     hiddenLayerNodes::Int = 2*size(expressionDataT1)[1],
-     shuffleData::Bool = true, seed::Int = 123, learningRate::Float64 = 0.005,
-     nEpochs::Int = 10, batchsize::Int = 100, checkStability::Bool = true,
-     iterToCheck::Int = 50, stabilityThreshold::Float32 = 2*maximum(expressionDataT1),
-     stabilityChecksBeforeFail::Int = 5, useGPU::Bool = false)`
 
-Function to train multiple neural ODEs to predict expression, allowing an ensembling of
-their predicitons, which tends to yield more accurate results on future predictions.
-This is because stochastic gradient descent yields slightly different solutions
-when given different random seeds. In the training data these solutions yield almost
-identical results, but when generalizing to future predictions, the results can
-diverge substantially. To account for this, we can average across multiple forecasters.
+ """
+ `createEnsembleForecaster(expressionDataT0::Matrix{Float32}, expressionDataT1::Matrix{Float32};
+      nNetworks::Int = 5, trainingProp::Float64 = 0.8,
+      hiddenLayerNodes::Int = 2*size(expressionDataT0)[1],
+      shuffleData::Bool = true, seed::Int = 123, learningRate::Float64 = 0.005,
+      nEpochs::Int = 10, batchsize::Int = 100, checkStability::Bool = false,
+      iterToCheck::Int = 50, stabilityThreshold::Float32 = 2*maximum(expressionDataT0),
+      stabilityChecksBeforeFail::Int = 5, useGPU::Bool = false)`
 
-It is recommended to run this function on a GPU (useGPU = true) or if a GPU is not
-available run in parallel. To train the neural networks on separate processes
-call
-`using Distributed
-addprocs(desiredNumberOfParallelProcesses)
-@everywhere using RNAForecaster`
+ Function to train multiple neural ODEs to predict expression, allowing an ensembling of
+ their predicitons, which tends to yield more accurate results on future predictions.
+ This is because stochastic gradient descent yields slightly different solutions
+ when given different random seeds. In the training data these solutions yield almost
+ identical results, but when generalizing to future predictions, the results can
+ diverge substantially. To account for this, we can average across multiple forecasters.
 
-# Required Arguments
-* expressionDataT1 - Float32 Matrix of log-normalized expression counts in the format of genes x cells
-* expressionDataT2 - Float32 Matrix of log-normalized expression counts in the format
- of genes x cells from a time after expressionDataT1
-# Keyword Arguments
-* nNetworks - number of networks to train
-* trainingProp - proportion of the data to use for training the model, the rest will be
- used for a validation set. If you don't want a validation set, this value can be set to 1.0
-* hiddenLayerNodes - number of nodes in the hidden layer of the neural network
-* shuffleData - should the cells be randomly shuffled before training
-* seed - random seed
-* learningRate - learning rate for the neural network during training
-* nEpochs - how many times should the neural network be trained on the data.
- Generally yields small gains in performance, can be lowered to speed up the training process
-* batchsize - batch size for training
-* checkStability - should the stability of the networks future time predictions be checked,
- retraining the network if unstable?
-* iterToCheck - when checking stability, how many future time steps should be predicted?
-* stabilityThreshold - when checking stability, what is the maximum gene variance allowable across predictions?
-* stabilityChecksBeforeFail - when checking stability, how many times should the network
- be allowed to retrain before an error is thrown? Used to prevent an infinite loop.
-* useGPU - use a GPU to train the neural network? highly recommended for large data sets, if available
-"""
-function createEnsembleForecaster(expressionDataT1::Matrix{Float32}, expressionDataT2::Matrix{Float32};
-     nNetworks::Int = 5, trainingProp::Float64 = 0.8,
-     hiddenLayerNodes::Int = 2*size(expressionDataT1)[1],
-     shuffleData::Bool = true, seed::Int = 123, learningRate::Float64 = 0.005,
-     nEpochs::Int = 10, batchsize::Int = 100, checkStability::Bool = true,
-     iterToCheck::Int = 50, stabilityThreshold::Float32 = 2*maximum(expressionDataT1),
-     stabilityChecksBeforeFail::Int = 5, useGPU::Bool = false)
+ It is recommended to run this function on a GPU (useGPU = true) or if a GPU is not
+ available run in parallel. To train the neural networks on separate processes
+ call
+ `using Distributed
+ addprocs(desiredNumberOfParallelProcesses)
+ @everywhere using RNAForecaster`
 
-     if nprocs() > 1 && useGPU
-         error("Using multiple separate julia processes on the GPU is currently not supported")
-     end
+ # Required Arguments
+ * expressionDataT0 - Float32 Matrix of log-normalized expression counts in the format of genes x cells
+ * expressionDataT1 - Float32 Matrix of log-normalized expression counts in the format
+  of genes x cells from a time after expressionDataT0
+ # Keyword Arguments
+ * nNetworks - number of networks to train
+ * trainingProp - proportion of the data to use for training the model, the rest will be
+  used for a validation set. If you don't want a validation set, this value can be set to 1.0
+ * hiddenLayerNodes - number of nodes in the hidden layer of the neural network
+ * shuffleData - should the cells be randomly shuffled before training
+ * seed - random seed
+ * learningRate - learning rate for the neural network during training
+ * nEpochs - how many times should the neural network be trained on the data.
+  Generally yields small gains in performance, can be lowered to speed up the training process
+ * batchsize - batch size for training
+ * checkStability - should the stability of the networks future time predictions be checked,
+  retraining the network if unstable?
+ * iterToCheck - when checking stability, how many future time steps should be predicted?
+ * stabilityThreshold - when checking stability, what is the maximum gene variance allowable across predictions?
+ * stabilityChecksBeforeFail - when checking stability, how many times should the network
+  be allowed to retrain before an error is thrown? Used to prevent an infinite loop.
+ * useGPU - use a GPU to train the neural network? highly recommended for large data sets, if available
+ """
+ function createEnsembleForecaster(expressionDataT0::Matrix{Float32}, expressionDataT1::Matrix{Float32};
+      nNetworks::Int = 5, trainingProp::Float64 = 0.8,
+      hiddenLayerNodes::Int = 2*size(expressionDataT0)[1],
+      shuffleData::Bool = true, seed::Int = 123, learningRate::Float64 = 0.005,
+      nEpochs::Int = 10, batchsize::Int = 100, checkStability::Bool = false,
+      iterToCheck::Int = 50, stabilityThreshold::Float32 = 2*maximum(expressionDataT0),
+      stabilityChecksBeforeFail::Int = 5, useGPU::Bool = false)
 
-     if useGPU
-         println("Training " * string(nNetworks) * " networks using on the GPU...")
-         networks = Vector{Any}(undef, nNetworks)
-         for i=1:nNetworks
-             seed = seed + ((i-1)*(stabilityChecksBeforeFail+1))
-             networks[i] = trainRNAForecaster(expressionDataT1, expressionDataT2,
-             trainingProp = trainingProp, hiddenLayerNodes = hiddenLayerNodes,
-             shuffleData = shuffleData, seed = seed, learningRate = learningRate,
-             nEpochs = nEpochs, batchsize = batchsize, checkStability = checkStability,
-             iterToCheck = iterToCheck, stabilityThreshold = stabilityThreshold,
-             stabilityChecksBeforeFail = stabilityChecksBeforeFail, useGPU = useGPU)
-         end
-         return networks
-     else
-         println("Training " * string(nNetworks) * " networks using " * string(nprocs()) * " parallel processes...")
-         networks = Vector{Any}(undef, nNetworks)
-         for i=1:nNetworks
-             seed = seed + ((i-1)*(stabilityChecksBeforeFail+1))
-             networks[i] = @spawn trainRNAForecaster(expressionDataT1, expressionDataT2,
-             trainingProp = trainingProp, hiddenLayerNodes = hiddenLayerNodes,
-             shuffleData = shuffleData, seed = seed, learningRate = learningRate,
-             nEpochs = nEpochs, batchsize = batchsize, checkStability = checkStability,
-             iterToCheck = iterToCheck, stabilityThreshold = stabilityThreshold,
-             stabilityChecksBeforeFail = stabilityChecksBeforeFail, useGPU = useGPU)
-         end
+      if nprocs() > 1 && useGPU
+          error("Using multiple separate julia processes on the GPU is currently not supported")
+      end
 
-         networks = fetch.(networks)
-         return networks
-     end
-end
+      if useGPU
+          println("Training " * string(nNetworks) * " networks using on the GPU...")
+          networks = Vector{Any}(undef, nNetworks)
+          for i=1:nNetworks
+              seed = seed + ((i-1)*(stabilityChecksBeforeFail+1))
+              networks[i] = trainRNAForecaster(expressionDataT0, expressionDataT1,
+              trainingProp = trainingProp, hiddenLayerNodes = hiddenLayerNodes,
+              shuffleData = shuffleData, seed = seed, learningRate = learningRate,
+              nEpochs = nEpochs, batchsize = batchsize, checkStability = checkStability,
+              iterToCheck = iterToCheck, stabilityThreshold = stabilityThreshold,
+              stabilityChecksBeforeFail = stabilityChecksBeforeFail, useGPU = useGPU)
+          end
+          return networks
+      else
+          println("Training " * string(nNetworks) * " networks using " * string(nprocs()) * " parallel processes...")
+          networks = Vector{Any}(undef, nNetworks)
+          for i=1:nNetworks
+              seed = seed + ((i-1)*(stabilityChecksBeforeFail+1))
+              networks[i] = @spawn trainRNAForecaster(expressionDataT0, expressionDataT1,
+              trainingProp = trainingProp, hiddenLayerNodes = hiddenLayerNodes,
+              shuffleData = shuffleData, seed = seed, learningRate = learningRate,
+              nEpochs = nEpochs, batchsize = batchsize, checkStability = checkStability,
+              iterToCheck = iterToCheck, stabilityThreshold = stabilityThreshold,
+              stabilityChecksBeforeFail = stabilityChecksBeforeFail, useGPU = useGPU)
+          end
+
+          networks = fetch.(networks)
+          return networks
+      end
+ end

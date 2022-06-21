@@ -1,25 +1,27 @@
 # Training and Forecasting
 
 Training RNAForecaster requires two expression count matrices. These count matrices should
-be genes x cells and should represent two different time points from the same cells. The current
-ways this can be accomplished from transcriptomic profiling is using spliced and unspliced counts
-or by using labeled and unlabeled counts from metabolic labeling scRNA-seq protocols such as scEU-seq.
+be formatted with genes  as rows and cells as columns. Each matrix should represent
+two different time points from the same cells. This can be accomplished from
+transcriptomic profiling using spliced and unspliced counts
+or by using labeled and unlabeled counts from metabolic labeling scRNA-seq
+protocols such as scEU-seq (see [Battich et al. 2020](10.1126/science.aax3072)).
 
 Here, we will generate two random matrices for illustrative purposes.
 
 ```julia
-testT1 = log1p.(Float32.(abs.(randn(10,1000))))
-testT2 = log1p.(0.5f0 .* testT1)
+testT0 = log1p.(Float32.(abs.(randn(10,1000))))
+testT1 = log1p.(0.5f0 .* testT0)
 ```
 Note that the input matrices are expected to be of type Float32 and log transformed,
 as shown above.
 
 # Training
 
-To train the model we call the `trainRNAForecaster` function.
+To train the neural ODE network we call the `trainRNAForecaster` function.
 
 ```julia
-testForecaster = trainRNAForecaster(testT1, testT2)
+testForecaster = trainRNAForecaster(testT0, testT1);
 ```
 
 In the simplest case, we only need to input the matrices, but there are several options
@@ -32,14 +34,10 @@ For example, by default RNAForecaster partitions the input data into a training
 and a validation set. If we want the neural network to be trained on the entire data
 set, we can set `trainingProp = 1.0`.
 
-One significant part of the training process is checking for model stability,
-which is on by default. What this does is make sure that when the network tries
-to make predictions several time steps into the future, that it does not make
-unreasonable predictions. This is necessary because sometimes the network makes
-extremely high predictions (e.g. predicting thousands of counts for a single gene).
-When this happens, we fully retrain the network, and because gradient descent is
-stochastic, we often find a more stable solution that does not lead to absurd predictions.
-If you don't want to check stability set `checkStability = false`.
+When using larger data sets, such as a matrix from a normal scRNAseq experiment which
+may contain thousands of variable genes and tens of thousands of cells, it becomes
+inefficient to train the network on a CPU. If a GPU is available, setting
+`useGPU = true` can massively speed up the training process.
 
 #Forecasting
 
@@ -48,14 +46,14 @@ states. For example, to predict the next fifty time points from our test data,
 we could run:
 
 ```julia
-testOut1 = predictCellFutures(testForecaster[1], testT1, 50)
+testOut1 = predictCellFutures(testForecaster[1], testT0, 50);
 ```
 
 The predictions can also be conditioned on arbitrary perturbations in gene expression.
 ```julia
 geneNames = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"]
-testOut2 = predictCellFutures(testForecaster[1], testT1, 50, perturbGenes = ["A", "B", "F"],
-geneNames = geneNames, perturbationLevels = [1.0f0, 2.0f0, 0.0f0])
+testOut2 = predictCellFutures(testForecaster[1], testT0, 50, perturbGenes = ["A", "B", "F"],
+geneNames = geneNames, perturbationLevels = [1.0f0, 2.0f0, 0.0f0]);
 ```
 
 
