@@ -5,7 +5,7 @@ be formatted with genes  as rows and cells as columns. Each matrix should repres
 two different time points from the same cells. This can be accomplished from
 transcriptomic profiling using spliced and unspliced counts
 or by using labeled and unlabeled counts from metabolic labeling scRNA-seq
-protocols such as scEU-seq (see [Battich et al. 2020](10.1126/science.aax3072)).
+protocols such as scEU-seq (see [Battich et al. 2020](https://doi.org/10.1126/science.aax3072)).
 
 Here, we will generate two random matrices for illustrative purposes.
 

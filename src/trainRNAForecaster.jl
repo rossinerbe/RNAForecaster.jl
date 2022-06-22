@@ -166,9 +166,7 @@ Each should be log normalized and have genes as rows and cells as columns.
 * stabilityChecksBeforeFail - when checking stability, how many times should the network
  be allowed to retrain before an error is thrown? Used to prevent an infinite loop.
 * useGPU - use a GPU to train the neural network? highly recommended for large data sets, if available
-
 """
-
 function trainRNAForecaster(expressionDataT0::Matrix{Float32}, expressionDataT1::Matrix{Float32};
      trainingProp::Float64 = 0.8, hiddenLayerNodes::Int = 2*size(expressionDataT0)[1],
      shuffleData::Bool = true, seed::Int = 123, learningRate::Float64 = 0.005,

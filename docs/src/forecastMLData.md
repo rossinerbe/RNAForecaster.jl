@@ -14,7 +14,7 @@ degraded transcripts in the labeling period, which we calculate via the slope
 between the labeled and total transcripts (see [Qiu et al. 2022](https://doi.org/10.1016/j.cell.2021.12.045)).
 
 Here we use a subset of a scEUseq dataset from hTERT immortalized retinal pigment
-epithelium cells, published by [Battich et al. 2020](10.1126/science.aax3072).
+epithelium cells, published by [Battich et al. 2020](https://doi.org/10.1126/science.aax3072).
 
 ```julia
 using JLD2
