@@ -7,7 +7,8 @@ makedocs(
     pages = ["Home" => "index.md",
              "Training and Forecasting" => "training.md",
              "Predictions from Splicing Data" => "splicedData.md",
-             "Metabolic Labeling for Forecasts" => "forecastMLData.md"],
+             "Metabolic Labeling for Forecasts" => "forecastMLData.md",
+             "Functions" => "functions.md"],
     modules = [RNAForecaster]
 )
 
